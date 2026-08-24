@@ -1,0 +1,35 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: token-as
+  namespace: REPLACE_WITH_EXISTING_NAMESPACE
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/backend-protocol: HTTP
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 32k
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "10"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "10"
+    nginx.ingress.kubernetes.io/limit-rps: "10"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "2"
+spec:
+  ingressClassName: nginx-public
+  tls:
+    - hosts: [as.example.com]
+      secretName: token-as-tls
+  rules:
+    - host: as.example.com
+      http:
+        paths:
+          - path: /as/token
+            pathType: Exact
+            backend: {service: {name: token-as, port: {name: http}}}
+          - path: /as/jwks
+            pathType: Exact
+            backend: {service: {name: token-as, port: {name: http}}}
+          - path: /.well-known/oauth-authorization-server
+            pathType: Exact
+            backend: {service: {name: token-as, port: {name: http}}}
+          - path: /healthz
+            pathType: Exact
+            backend: {service: {name: token-as, port: {name: http}}}

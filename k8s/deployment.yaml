@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: token-as
+  namespace: REPLACE_WITH_EXISTING_NAMESPACE
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  minReadySeconds: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels: {app: token-as}
+  template:
+    metadata:
+      labels: {app: token-as}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: token-as
+          image: ghcr.io/example/token-exchange-as@sha256:REPLACE_WITH_IMAGE_DIGEST
+          imagePullPolicy: IfNotPresent
+          ports: [{name: http, containerPort: 8000}]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          env:
+            - {name: AS_ISSUER, value: https://as.example.com}
+            - {name: SIGNING_KEY_PATH, value: /var/run/token-as/signing-key/signing-key.pem}
+            - {name: SIGNING_KEY_ID, value: as-2026-08}
+            - {name: SIGNING_KEY_ALGORITHM, value: RS256}
+            - {name: TOKEN_TTL_SECONDS, value: "300"}
+            - {name: TOKEN_MAX_TTL_SECONDS, value: "300"}
+            - {name: CLOCK_SKEW_SECONDS, value: "30"}
+            - {name: ALLOW_INSECURE_HTTP, value: "false"}
+            - {name: P1AZ_MODE, value: enforce}
+            - {name: P1AZ_AUTH_BASE, value: https://auth.pingone.com}
+            - {name: P1AZ_API_BASE, value: https://api.pingone.com/v1}
+            - {name: P1AZ_TIMEOUT_SECONDS, value: "5"}
+            - {name: P1AZ_TOKEN_SAFETY_SECONDS, value: "60"}
+            - {name: INTROSPECTION_ISSUER, value: https://auth.pingone.com/REPLACE_ENVIRONMENT_ID/as}
+            - {name: INTROSPECTION_TIMEOUT_SECONDS, value: "5"}
+            - {name: TOKEN_CLIENT_ID, valueFrom: {secretKeyRef: {name: token-as-credentials, key: TOKEN_CLIENT_ID}}}
+            - {name: TOKEN_CLIENT_SECRET, valueFrom: {secretKeyRef: {name: token-as-credentials, key: TOKEN_CLIENT_SECRET}}}
+            - {name: P1AZ_ENVIRONMENT_ID, valueFrom: {secretKeyRef: {name: token-as-credentials, key: P1AZ_ENVIRONMENT_ID}}}
+            - {name: P1AZ_DECISION_ENDPOINT_ID, valueFrom: {secretKeyRef: {name: token-as-credentials, key: P1AZ_DECISION_ENDPOINT_ID}}}
+            - {name: P1AZ_WORKER_CLIENT_ID, valueFrom: {secretKeyRef: {name: token-as-credentials, key: P1AZ_WORKER_CLIENT_ID}}}
+            - {name: P1AZ_WORKER_CLIENT_SECRET, valueFrom: {secretKeyRef: {name: token-as-credentials, key: P1AZ_WORKER_CLIENT_SECRET}}}
+            - {name: INTROSPECTION_CLIENT_ID, valueFrom: {secretKeyRef: {name: token-as-credentials, key: INTROSPECTION_CLIENT_ID}}}
+            - {name: INTROSPECTION_CLIENT_SECRET, valueFrom: {secretKeyRef: {name: token-as-credentials, key: INTROSPECTION_CLIENT_SECRET}}}
+          volumeMounts:
+            - {name: signing-key, mountPath: /var/run/token-as/signing-key, readOnly: true}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          startupProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 30}
+          readinessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 5, timeoutSeconds: 2, failureThreshold: 3}
+          livenessProbe: {httpGet: {path: /healthz, port: http}, periodSeconds: 10, timeoutSeconds: 2, failureThreshold: 3}
+      volumes:
+        - name: signing-key
+          secret:
+            secretName: token-as-signing-key-2026-08
+            defaultMode: 0440
+            items:
+              - {key: signing-key.pem, path: signing-key.pem}

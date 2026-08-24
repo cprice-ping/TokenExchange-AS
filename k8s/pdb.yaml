@@ -1,0 +1,8 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: token-as
+  namespace: REPLACE_WITH_EXISTING_NAMESPACE
+spec:
+  minAvailable: 1
+  selector: {matchLabels: {app: token-as}}
