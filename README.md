@@ -57,6 +57,38 @@ For a follow-on exchange using an existing OBO token, `actor_token` is omitted. 
 
 The P1AZ snapshot in [`p1az/TokenExchange.snapshot`](p1az/TokenExchange.snapshot) defines the corresponding `Request.TokenExchange` attributes and demonstrates policy checks for trusted issuers, requested audiences, and requested scopes. The snapshot is a policy reference only; the service sends the decision request at runtime and does not make those authorization decisions locally.
 
+## Environment variables
+
+The service is configured entirely through environment variables. Secrets should come from Kubernetes Secrets, External Secrets, KMS/HSM integration, or another secret manager—not from committed files.
+
+| Variable | Required | Description |
+|---|---:|---|
+| `AS_ISSUER` | Yes | Canonical public issuer URL placed in minted JWTs and authorization-server metadata. Use the HTTPS Ingress FQDN without a trailing slash. |
+| `TOKEN_CLIENT_ID` | Yes | OAuth client ID accepted by the RFC 8693 token endpoint. |
+| `TOKEN_CLIENT_SECRET` | Yes | OAuth client secret for RFC 8693 HTTP Basic authentication. |
+| `TOKEN_TTL_SECONDS` | No | Requested lifetime, in seconds, for minted tokens. Default: `300`. |
+| `TOKEN_MAX_TTL_SECONDS` | No | Hard upper bound on minted-token lifetime. Default: `300`. |
+| `SIGNING_KEY_PATH` | Yes in production | Read-only path to the RSA private PEM used to sign output JWTs. Mount from a Secret/KMS integration. |
+| `SIGNING_KEY_ALGORITHM` | No | Signing algorithm. Currently `RS256`. |
+| `SIGNING_KEY_ID` | Yes in production | Stable JWT `kid` published by `/as/jwks`. All replicas must use the same key and ID. |
+| `CLOCK_SKEW_SECONDS` | No | Clock-skew allowance for inbound JWT validation. Default: `30`. |
+| `ALLOW_INSECURE_HTTP` | No | Allows HTTP issuer discovery for local development only. Set `false` in production. |
+| `P1AZ_MODE` | Yes | Must be `enforce` for production; disabled/unavailable policy evaluation fails closed. |
+| `P1AZ_AUTH_BASE` | No | PingOne authorization-server base URL used to obtain the Worker token. Default: `https://auth.pingone.com`. |
+| `P1AZ_API_BASE` | No | PingOne API base URL used for decision evaluation. Default: `https://api.pingone.com/v1`. |
+| `P1AZ_ENVIRONMENT_ID` | Yes | PingOne environment containing the Worker application and decision endpoint. |
+| `P1AZ_DECISION_ENDPOINT_ID` | Yes | PingOne Authorize decision endpoint used for token-exchange policy. |
+| `P1AZ_WORKER_CLIENT_ID` | Yes | PingOne Worker application client ID. |
+| `P1AZ_WORKER_CLIENT_SECRET` | Yes | PingOne Worker application secret. The Worker token request uses `client_credentials` with no scope. |
+| `P1AZ_TIMEOUT_SECONDS` | No | Timeout for Worker-token and decision calls. Default: `5`. |
+| `P1AZ_TOKEN_SAFETY_SECONDS` | No | Refresh margin before a cached Worker token expires. Default: `60`. |
+| `INTROSPECTION_ISSUER` | Required for `access_token` inputs | The single OIDC issuer whose RFC 7662 introspection endpoint validates declared access tokens. |
+| `INTROSPECTION_CLIENT_ID` | Required for `access_token` inputs | Confidential client ID used for RFC 7662 Basic authentication. |
+| `INTROSPECTION_CLIENT_SECRET` | Required for `access_token` inputs | Confidential client secret used for RFC 7662 Basic authentication. |
+| `INTROSPECTION_TIMEOUT_SECONDS` | No | Timeout for OIDC discovery and introspection calls. Default: `5`. |
+
+`P1AZ_WORKER_CLIENT_SECRET`, `INTROSPECTION_CLIENT_SECRET`, `TOKEN_CLIENT_SECRET`, and the signing key are sensitive. Never log, commit, or include them in image layers. `P1AZ_WORKER_CLIENT_ID` and `INTROSPECTION_CLIENT_ID` are also operational credentials and should be injected from deployment secrets where practical.
+
 ## Run locally
 
 ```bash
