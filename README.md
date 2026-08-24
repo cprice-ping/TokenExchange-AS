@@ -15,6 +15,48 @@ For the initial on-behalf-of exchange, send the human JWT as `subject_token` and
 
 `sub` is the delegating human. `act.sub` is the Agent currently acting on their behalf. The server never copies arbitrary roles, groups, or permissions from input tokens.
 
+## PingOne Authorize decision request
+
+The token exchange service sends a decision request to the configured PingOne Authorize decision endpoint after validating the inbound token(s). The request uses an isolated `Request.TokenExchange` attribute namespace so the policy can distinguish token-exchange inputs from other policy requests:
+
+```json
+{
+  "parameters": {
+    "Request.TokenExchange.Subject.sub": "2ece0764-93cc-426c-980d-152f824928b1",
+    "Request.TokenExchange.Subject.iss": "https://auth.pingone.com/<environment-id>/as",
+    "Request.TokenExchange.Actor.sub": "system:serviceaccount:namespace:agent",
+    "Request.TokenExchange.Actor.iss": "https://oidc.eks.<region>.amazonaws.com/id/<cluster-id>",
+    "Request.TokenExchange.aud": "gateway",
+    "Request.TokenExchange.scope": "use_gateway"
+  }
+}
+```
+
+The HTTP request is:
+
+```http
+POST https://api.pingone.com/v1/environments/<environment-id>/decisionEndpoints/<decision-endpoint-id>
+Authorization: Bearer <PingOne Worker token>
+Content-Type: application/json
+```
+
+The Worker token is obtained with a server-side `client_credentials` request and no requested scope. Only a decision response containing `decision: "PERMIT"` allows the service to mint the exchanged JWT.
+
+For a follow-on exchange using an existing OBO token, `actor_token` is omitted. In that case the request contains the subject and requested `aud`/`scope`, but no `Request.TokenExchange.Actor.*` parameters:
+
+```json
+{
+  "parameters": {
+    "Request.TokenExchange.Subject.sub": "2ece0764-93cc-426c-980d-152f824928b1",
+    "Request.TokenExchange.Subject.iss": "https://token-exchange.example.com",
+    "Request.TokenExchange.aud": "profile-api",
+    "Request.TokenExchange.scope": "read_profile"
+  }
+}
+```
+
+The P1AZ snapshot in [`p1az/TokenExchange.snapshot`](p1az/TokenExchange.snapshot) defines the corresponding `Request.TokenExchange` attributes and demonstrates policy checks for trusted issuers, requested audiences, and requested scopes. The snapshot is a policy reference only; the service sends the decision request at runtime and does not make those authorization decisions locally.
+
 ## Run locally
 
 ```bash
