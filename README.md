@@ -66,7 +66,21 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-The service has no database or admin UI. Configure all credentials and policy through environment variables. JWT validation derives the issuer from each token and performs safe OIDC discovery/JWKS verification. Opaque access tokens use RFC 7662 through `INTROSPECTION_ISSUER`; PingOne Authorize makes the final trust/delegation decision. The development `.env.example` enables HTTP only for local test issuers. Production issuers must use HTTPS and resolve outside private/link-local networks.
+The service has no database or admin UI. Configure all credentials and policy through environment variables. JWT validation derives the issuer from each token and performs safe OIDC discovery/JWKS verification. Opaque access tokens use RFC 7662 through the single configured `INTROSPECTION_ISSUER` and its single configured introspection client; this service is intentionally scoped to one known access-token issuer, not a multi-issuer introspection broker. A second access-token issuer requires a separate deployment/configuration (or a future per-issuer credential design). PingOne Authorize makes the final trust/delegation decision. The development `.env.example` enables HTTP only for local test issuers. Production issuers must use HTTPS and resolve outside private/link-local networks.
+
+## Token validation
+
+The declared RFC 8693 token type selects the validation method:
+
+| Token type | Validation |
+|---|---|
+| `urn:ietf:params:oauth:token-type:jwt` | OIDC discovery, JWKS lookup, algorithm/key selection, signature verification, issuer, expiry, issued-at, and claim-shape checks |
+| `urn:ietf:params:oauth:token-type:access_token` | RFC 7662 introspection at the configured `INTROSPECTION_ISSUER`; requires an introspection response with `active: true` |
+
+An `access_token` is introspected even when it is JWT-shaped. The service does not use its JWKS path for that declared token type. The introspection client credentials are separate from the RFC 8693 client credentials and the PingOne Authorize Worker credentials.
+
+The service performs authentication and token-shape validation only. It does not locally authorize issuer trust, subject/Agent delegation, requested audience, or requested scope. Those decisions are sent to PingOne Authorize, and only `PERMIT` results in a minted token.
+
 
 ## Exchange request
 
