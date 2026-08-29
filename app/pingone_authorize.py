@@ -73,17 +73,12 @@ class PingOneAuthorize:
             })
         token = self._worker_token()
         url = f"{s.p1az_api_base.rstrip('/')}/environments/{s.p1az_environment_id}/decisionEndpoints/{s.p1az_decision_endpoint_id}"
-        try:
-            response = httpx.post(url, json={"parameters": parameters}, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, timeout=s.p1az_timeout_seconds)
-            if response.status_code == 401:
-                token = self._worker_token(force=True)
-                response = httpx.post(url, json={"parameters": parameters}, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, timeout=s.p1az_timeout_seconds)
-        except httpx.HTTPError as exc:
-            raise P1AZError("decision_network") from exc
-        if response.status_code == 429 or response.status_code >= 500:
-            raise P1AZError("decision_unavailable")
+        response = self._post_decision(url, parameters, token)
+        if response.status_code == 401:
+            token = self._worker_token(force=True)
+            response = self._post_decision(url, parameters, token)
         if response.status_code >= 400:
-            raise P1AZError("decision_rejected")
+            raise P1AZError("decision_rejected" if response.status_code < 500 else "decision_unavailable")
         try:
             result = response.json()
         except ValueError as exc:
@@ -92,6 +87,46 @@ class PingOneAuthorize:
         if decision == "PERMIT": return result
         if decision == "DENY": raise P1AZError("denied", "token exchange denied")
         raise P1AZError("decision_unavailable")
+
+    def _post_decision(self, url: str, parameters: dict[str, str], token: str) -> httpx.Response:
+        """POST the decision request with a bounded 429 retry.
+
+        Retries honor Retry-After (seconds or HTTP-date) when present, falling
+        back to a capped exponential backoff. Unbounded retries are not
+        possible: P1AZ throttling must surface to the caller instead of
+        stalling token exchanges.
+        """
+        s = get_settings()
+        max_attempts = 3
+        backoff_seconds = 0.25
+        response: httpx.Response | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = httpx.post(url, json={"parameters": parameters}, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, timeout=s.p1az_timeout_seconds)
+            except httpx.HTTPError as exc:
+                raise P1AZError("decision_network") from exc
+            if response.status_code != 429 or attempt == max_attempts:
+                return response
+            retry_after = self._retry_after_seconds(response.headers.get("Retry-After"))
+            delay = retry_after if retry_after is not None else backoff_seconds * (2 ** (attempt - 1))
+            time.sleep(min(delay, 2.0))
+        return response  # pragma: no cover - loop always returns or raises
+
+    @staticmethod
+    def _retry_after_seconds(value: str | None) -> float | None:
+        if not value:
+            return None
+        try:
+            seconds = float(value)
+            return max(0.0, seconds)
+        except ValueError:
+            pass
+        try:
+            from email.utils import parsedate_to_datetime
+            delay = (parsedate_to_datetime(value).timestamp() - time.time())
+            return max(0.0, delay)
+        except (TypeError, ValueError):
+            return None
 
 def _claim_string(value: Any) -> str:
     if value is None: return ""
