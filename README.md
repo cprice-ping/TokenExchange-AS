@@ -129,6 +129,8 @@ The declared RFC 8693 token type selects the validation method:
 
 An `access_token` is never validated locally, even when it is JWT-shaped: the service does not use its JWKS path for that declared type. The policy is the sole validator for that token type. The value must still be decodable as a JWT so its claims can be propagated into the minted token; a non-JWT value fails closed locally. Support for fully opaque values (identity resolved from the P1AZ decision response instead of a local decode) is not implemented.
 
+On `PERMIT`, the identity claims in the minted token (`sub`, `act.sub`) come from the service's own decode of the same raw token, not from the decision response — the service never reads claims back from PingOne Authorize. `PERMIT` means the policy validated the token (introspection returned `active` at the token's issuer); the propagated claims are the service's read of those same bytes, which the issuer attests by returning `active: true` for a token it issued. Taking outbound identity from claims returned in the decision response is not implemented.
+
 The service performs authentication and token-shape validation only. It does not locally authorize issuer trust, subject/Agent delegation, requested audience, or requested scope. Those decisions are sent to PingOne Authorize, and only `PERMIT` results in a minted token.
 
 
