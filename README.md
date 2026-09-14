@@ -127,7 +127,7 @@ The declared RFC 8693 token type selects the validation method:
 | `urn:ietf:params:oauth:token-type:jwt` | OIDC discovery, JWKS lookup, algorithm/key selection, signature verification, issuer, expiry, issued-at, and claim-shape checks |
 | `urn:ietf:params:oauth:token-type:access_token` | Sent to PingOne Authorize as `Request.TokenExchange.<Subject/Actor>.token`; the policy validates it by introspecting it at the issuer (RFC 7662) and fails closed |
 
-An `access_token` is never validated locally, even when it is JWT-shaped: the service does not use its JWKS path for that declared type. The policy is the sole validator for that token type.
+An `access_token` is never validated locally, even when it is JWT-shaped: the service does not use its JWKS path for that declared type. The policy is the sole validator for that token type. The value must still be decodable as a JWT so its claims can be propagated into the minted token; a non-JWT value fails closed locally. Support for fully opaque values (identity resolved from the P1AZ decision response instead of a local decode) is not implemented.
 
 The service performs authentication and token-shape validation only. It does not locally authorize issuer trust, subject/Agent delegation, requested audience, or requested scope. Those decisions are sent to PingOne Authorize, and only `PERMIT` results in a minted token.
 
