@@ -21,7 +21,7 @@ class ExchangeClient:
 
 def _safe_category(error: Exception) -> str:
     text = str(error).lower()
-    for category in ('introspection_source_missing', 'introspection_inactive', 'introspection_unavailable', 'introspection', 'issuer', 'jwks', 'signature', 'algorithm', 'audience', 'subject', 'actor', 'discovery', 'key', 'token'):
+    for category in ('issuer', 'jwks', 'signature', 'algorithm', 'audience', 'subject', 'actor', 'discovery', 'key', 'token'):
         if category in text: return category
     return 'validation'
 
@@ -73,17 +73,22 @@ def token_exchange(request: Request, grant_type: str = Form(''), subject_token: 
     subject_claims = None
     actor_claims = None
     try:
-        subject_claims = validate_token(subject_token, subject_token_type, introspection_issuer=get_settings().introspection_issuer)
-        logger.info('token exchange token validated correlation_id=%s role=subject token_type=%s issuer=%s', correlation_id, subject_token_type, subject_claims.get('iss', '<introspection>'))
-        actor_claims = validate_token(actor_token, actor_token_type or '', actor=True, introspection_issuer=get_settings().introspection_issuer) if actor_token else None
-        if actor_claims is not None: logger.info('token exchange token validated correlation_id=%s role=actor token_type=%s issuer=%s', correlation_id, actor_token_type, actor_claims.get('iss', '<introspection>'))
+        subject_claims = validate_token(subject_token, subject_token_type)
+        logger.info('token exchange token validated correlation_id=%s role=subject token_type=%s issuer=%s', correlation_id, subject_token_type, subject_claims.get('iss', '<access_token>'))
+        actor_claims = validate_token(actor_token, actor_token_type or '', actor=True) if actor_token else None
+        if actor_claims is not None: logger.info('token exchange token validated correlation_id=%s role=actor token_type=%s issuer=%s', correlation_id, actor_token_type, actor_claims.get('iss', '<access_token>'))
     except ValueError as exc:
         role = 'actor' if subject_claims is not None and actor_token else 'subject'
         logger.warning('token exchange rejected correlation_id=%s role=%s category=%s', correlation_id, role, _safe_category(exc))
         return oauth_error('invalid_grant', 'the supplied token is not valid')
     if get_settings().p1az_mode == 'disabled': return oauth_error('temporarily_unavailable', 'token exchange policy is unavailable', 503)
     try:
-        p1az.decide(subject=subject_claims, actor=actor_claims, subject_token_type=subject_token_type, actor_token_type=actor_token_type, requested_audience=target, requested_scope=requested_scope, client_id=client.client_id)
+        # Declared access tokens are opaque locally: the raw values are sent
+        # to P1AZ for policy validation (introspection at the issuer). JWTs
+        # were validated against their issuer's JWKS, so they stay off the wire.
+        subject_token_for_p1az = subject_token if subject_token_type == ACCESS else None
+        actor_token_for_p1az = actor_token if actor_claims is not None and actor_token_type == ACCESS else None
+        p1az.decide(subject=subject_claims, actor=actor_claims, subject_token_type=subject_token_type, actor_token_type=actor_token_type, subject_token=subject_token_for_p1az, actor_token=actor_token_for_p1az, requested_audience=target, requested_scope=requested_scope, client_id=client.client_id)
     except P1AZError as exc:
         logger.warning('token exchange P1AZ failure correlation_id=%s category=%s', correlation_id, exc.category)
         if exc.category == 'denied': return oauth_error('access_denied', 'token exchange denied', 403)

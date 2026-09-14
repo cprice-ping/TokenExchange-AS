@@ -7,7 +7,6 @@ import jwt
 from jwt import PyJWK
 
 from .discovery import discover, fetch_jwks, DiscoveryError, normalize_issuer
-from .introspection import introspect, IntrospectionError
 
 JWT_TYPE = 'urn:ietf:params:oauth:token-type:jwt'
 ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token'
@@ -15,6 +14,22 @@ ACCESS_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:access_token'
 # strictly by the declared token type.
 JWT_TYPES = {JWT_TYPE, ACCESS_TOKEN_TYPE}
 ALGORITHMS = {'RS256', 'ES256'}
+
+
+def _claims_from_unverified_token(token: str, *, actor: bool) -> dict:
+    """Decode token claims without verification, for claim propagation only.
+
+    Declared ``access_token`` inputs are validated by PingOne Authorize's
+    policy (which performs RFC 7662 introspection at the issuer); the token
+    is sent there in the decision parameters. Locally this decode supplies
+    only the claim values copied into the minted token — it is never a
+    trust or authentication decision.
+    """
+    try:
+        claims = jwt.decode(token, options={'verify_signature': False, 'verify_exp': False})
+    except (jwt.PyJWTError, ValueError, TypeError) as exc:
+        raise ValueError(f'access token is not a decodable JWT: {exc}') from exc
+    return _normalize_claims(claims, actor=actor)
 
 
 def _issuer_from_unverified_token(token: str) -> str:
@@ -60,28 +75,36 @@ def _normalize_claims(claims: dict, *, actor: bool) -> dict:
         return normalized
     if isinstance(claims.get('sub'), str) and claims['sub']:
         return claims
+    # PingOne client-credentials JWTs name the client in client_id and omit
+    # sub; accept that as the actor subject. Subjects (actor=False) never
+    # get this fallback: a client token must never mint a token about a
+    # person.
+    client_id = claims.get('client_id')
+    if isinstance(client_id, str) and client_id:
+        normalized = dict(claims)
+        normalized['sub'] = client_id
+        return normalized
     raise ValueError('actor token has no actor subject')
 
 
-def validate_token(token: str, token_type: str, *, actor: bool = False, introspection_issuer: str = '') -> dict:
-    """Cryptographically validate a JWT without making an issuer trust decision.
+def validate_token(token: str, token_type: str, *, actor: bool = False) -> dict:
+    """Validate a token by its declared RFC 8693 type.
 
-    The unverified ``iss`` is used only to locate OIDC discovery/JWKS. The
-    discovered metadata must echo that issuer and PyJWT verifies the final
-    token against it. Authorization of the subject/actor relationship is left
-    to PingOne Authorize.
+    JWT inputs are cryptographically validated: the unverified ``iss`` is
+    used only to locate OIDC discovery/JWKS, the discovered metadata must
+    echo that issuer, and PyJWT verifies the final token against it.
+    Declared ``access_token`` inputs are opaque to this service: no local
+    validation is possible, so the raw value is sent to PingOne Authorize
+    for policy validation (including introspection at the issuer) and only
+    its claims are decoded locally for propagation into the minted token.
     """
     if token_type not in JWT_TYPES or not token:
         raise ValueError('invalid token')
     if token_type == ACCESS_TOKEN_TYPE:
-        try:
-            if not introspection_issuer:
-                raise ValueError('introspection_source_missing')
-            return _normalize_claims(introspect(token, issuer=introspection_issuer), actor=actor)
-        except IntrospectionError as exc:
-            raise ValueError(f'{exc.category}: {exc}') from exc
+        return _claims_from_unverified_token(token, actor=actor)
 
     issuer = _issuer_from_unverified_token(token)
+    from .config import get_settings
     try:
         metadata = discover(issuer)
         jwks = fetch_jwks(metadata)
@@ -105,7 +128,7 @@ def validate_token(token: str, token_type: str, *, actor: bool = False, introspe
             key,
             algorithms=[algorithm],
             issuer=issuer,
-            leeway=30,
+            leeway=get_settings().clock_skew_seconds,
             options={
                 'require': ['exp', 'iat'] + ([] if actor else ['sub']),
                 'verify_aud': False,

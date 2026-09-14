@@ -53,7 +53,7 @@ class PingOneAuthorize:
             self._cached = _WorkerToken(token, now + expires)
             return token
 
-    def decide(self, *, subject: dict[str, Any], actor: dict[str, Any] | None, subject_token_type: str, actor_token_type: str | None, requested_audience: str | None = None, requested_scope: str | None = None, client_id: str | None = None) -> dict[str, Any]:
+    def decide(self, *, subject: dict[str, Any], actor: dict[str, Any] | None, subject_token_type: str, actor_token_type: str | None, subject_token: str | None = None, actor_token: str | None = None, requested_audience: str | None = None, requested_scope: str | None = None, client_id: str | None = None) -> dict[str, Any]:
         s = get_settings()
         if not self.configured():
             raise P1AZError("not_configured")
@@ -65,7 +65,18 @@ class PingOneAuthorize:
             # whether the requested output scope/audience is allowed.
             "Request.TokenExchange.scope": str(requested_scope or ""),
             "Request.TokenExchange.aud": str(requested_audience or ""),
+            # The declared token types let the policy pick the validation
+            # path per input (introspection for access tokens). The raw
+            # opaque tokens are sent only when declared as access tokens:
+            # policy then validates them (RFC 7662 at the issuer). JWT
+            # inputs were already validated locally and stay off the wire.
+            "Request.TokenExchange.Subject.token_type": str(subject_token_type),
+            "Request.TokenExchange.Actor.token_type": str(actor_token_type or ""),
         }
+        if subject_token is not None:
+            parameters["Request.TokenExchange.Subject.token"] = str(subject_token)
+        if actor_token is not None:
+            parameters["Request.TokenExchange.Actor.token"] = str(actor_token)
         if actor is not None:
             parameters.update({
                 "Request.TokenExchange.Actor.sub": str(actor["sub"]),

@@ -3,6 +3,7 @@ import httpx
 import pytest
 from app.config import get_settings
 from app.pingone_authorize import PingOneAuthorize, P1AZError
+from app.validation import ACCESS_TOKEN_TYPE
 
 class FakeResponse:
     def __init__(self, status, body, headers=None):
@@ -45,11 +46,33 @@ def test_decision_parameters_are_namespaced(monkeypatch):
     assert payload == {
         'Request.TokenExchange.Subject.sub': 'human',
         'Request.TokenExchange.Subject.iss': 'https://human.example',
+        'Request.TokenExchange.Subject.token_type': 'jwt',
         'Request.TokenExchange.Actor.sub': 'agent',
         'Request.TokenExchange.Actor.iss': 'https://agent.example',
+        'Request.TokenExchange.Actor.token_type': 'jwt',
         'Request.TokenExchange.scope': '',
         'Request.TokenExchange.aud': '',
     }
+
+def test_access_token_is_sent_and_jwt_is_not(monkeypatch):
+    _configure(monkeypatch)
+    calls = []
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        if url.endswith('/as/token'): return FakeResponse(200, {'access_token': 'worker-token', 'expires_in': 300})
+        return FakeResponse(200, {'decision': 'PERMIT'})
+    monkeypatch.setattr(httpx, 'post', post)
+    PingOneAuthorize().decide(
+        subject={'sub':'human','iss':'https://human.example'}, actor=None,
+        subject_token_type=ACCESS_TOKEN_TYPE, actor_token_type=None,
+        subject_token='opaque-or-jwt-shaped-token', actor_token=None,
+    )
+    payload = calls[-1][1]['json']['parameters']
+    assert payload['Request.TokenExchange.Subject.token_type'] == ACCESS_TOKEN_TYPE
+    assert payload['Request.TokenExchange.Subject.token'] == 'opaque-or-jwt-shaped-token'
+    assert payload['Request.TokenExchange.Actor.token_type'] == ''
+    assert 'Request.TokenExchange.Actor.token' not in payload
+    assert 'Request.TokenExchange.Actor.sub' not in payload
 
 def test_denied_decision_fails_closed(monkeypatch):
     monkeypatch.setenv('P1AZ_ENVIRONMENT_ID', 'env')

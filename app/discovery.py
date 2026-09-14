@@ -58,8 +58,20 @@ def _get_json(url: str) -> dict:
     except ValueError as exc: raise DiscoveryError('issuer metadata is not JSON') from exc
 
 def discover(issuer: str) -> dict:
+    """Discover OIDC/JWKS metadata, with RFC 8414 AS metadata fallback.
+
+    External OIDC issuers normally expose ``openid-configuration``. Tokens
+    minted by this service expose RFC 8414 OAuth authorization-server metadata
+    at the endpoint implemented by ``app.main`` instead.
+    """
     issuer = normalize_issuer(issuer)
-    metadata = _get_json(f'{issuer}/.well-known/openid-configuration')
+    try:
+        metadata = _get_json(f'{issuer}/.well-known/openid-configuration')
+    except DiscoveryError as oidc_error:
+        try:
+            metadata = _get_json(f'{issuer}/.well-known/oauth-authorization-server')
+        except DiscoveryError:
+            raise oidc_error
     if metadata.get('issuer', '').rstrip('/') != issuer:
         raise DiscoveryError('issuer metadata does not match configured issuer')
     jwks_uri = metadata.get('jwks_uri')

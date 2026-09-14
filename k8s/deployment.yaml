@@ -49,16 +49,12 @@ spec:
             - {name: P1AZ_API_BASE, value: https://api.pingone.com/v1}
             - {name: P1AZ_TIMEOUT_SECONDS, value: "5"}
             - {name: P1AZ_TOKEN_SAFETY_SECONDS, value: "60"}
-            - {name: INTROSPECTION_ISSUER, value: https://auth.pingone.com/REPLACE_ENVIRONMENT_ID/as}
-            - {name: INTROSPECTION_TIMEOUT_SECONDS, value: "5"}
             - {name: TOKEN_CLIENT_ID, valueFrom: {secretKeyRef: {name: token-as-credentials, key: TOKEN_CLIENT_ID}}}
             - {name: TOKEN_CLIENT_SECRET, valueFrom: {secretKeyRef: {name: token-as-credentials, key: TOKEN_CLIENT_SECRET}}}
             - {name: P1AZ_ENVIRONMENT_ID, valueFrom: {secretKeyRef: {name: token-as-credentials, key: P1AZ_ENVIRONMENT_ID}}}
             - {name: P1AZ_DECISION_ENDPOINT_ID, valueFrom: {secretKeyRef: {name: token-as-credentials, key: P1AZ_DECISION_ENDPOINT_ID}}}
             - {name: P1AZ_WORKER_CLIENT_ID, valueFrom: {secretKeyRef: {name: token-as-credentials, key: P1AZ_WORKER_CLIENT_ID}}}
             - {name: P1AZ_WORKER_CLIENT_SECRET, valueFrom: {secretKeyRef: {name: token-as-credentials, key: P1AZ_WORKER_CLIENT_SECRET}}}
-            - {name: INTROSPECTION_CLIENT_ID, valueFrom: {secretKeyRef: {name: token-as-credentials, key: INTROSPECTION_CLIENT_ID}}}
-            - {name: INTROSPECTION_CLIENT_SECRET, valueFrom: {secretKeyRef: {name: token-as-credentials, key: INTROSPECTION_CLIENT_SECRET}}}
           volumeMounts:
             - {name: signing-key, mountPath: /var/run/token-as/signing-key, readOnly: true}
           resources:

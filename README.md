@@ -24,8 +24,10 @@ The token exchange service sends a decision request to the configured PingOne Au
   "parameters": {
     "Request.TokenExchange.Subject.sub": "2ece0764-93cc-426c-980d-152f824928b1",
     "Request.TokenExchange.Subject.iss": "https://auth.pingone.com/<environment-id>/as",
+    "Request.TokenExchange.Subject.token_type": "urn:ietf:params:oauth:token-type:jwt",
     "Request.TokenExchange.Actor.sub": "system:serviceaccount:namespace:agent",
     "Request.TokenExchange.Actor.iss": "https://oidc.eks.<region>.amazonaws.com/id/<cluster-id>",
+    "Request.TokenExchange.Actor.token_type": "urn:ietf:params:oauth:token-type:jwt",
     "Request.TokenExchange.aud": "gateway",
     "Request.TokenExchange.scope": "use_gateway"
   }
@@ -49,13 +51,33 @@ For a follow-on exchange using an existing OBO token, `actor_token` is omitted. 
   "parameters": {
     "Request.TokenExchange.Subject.sub": "2ece0764-93cc-426c-980d-152f824928b1",
     "Request.TokenExchange.Subject.iss": "https://token-exchange.example.com",
+    "Request.TokenExchange.Subject.token_type": "urn:ietf:params:oauth:token-type:jwt",
+    "Request.TokenExchange.Actor.token_type": "",
     "Request.TokenExchange.aud": "profile-api",
     "Request.TokenExchange.scope": "read_profile"
   }
 }
 ```
 
-The P1AZ snapshot in [`p1az/TokenExchange.snapshot`](p1az/TokenExchange.snapshot) defines the corresponding `Request.TokenExchange` attributes and demonstrates policy checks for trusted issuers, requested audiences, and requested scopes. The snapshot is a policy reference only; the service sends the decision request at runtime and does not make those authorization decisions locally.
+When a token is declared as `urn:ietf:params:oauth:token-type:access_token`, the service sends its raw value as `Request.TokenExchange.Subject.token` (or `Request.TokenExchange.Actor.token`) in the same decision request:
+
+```json
+{
+  "parameters": {
+    "Request.TokenExchange.Subject.sub": "2ece0764-93cc-426c-980d-152f824928b1",
+    "Request.TokenExchange.Subject.iss": "https://auth.pingone.com/<environment-id>/as",
+    "Request.TokenExchange.Subject.token_type": "urn:ietf:params:oauth:token-type:access_token",
+    "Request.TokenExchange.Subject.token": "<raw access token>",
+    "Request.TokenExchange.Actor.token_type": "",
+    "Request.TokenExchange.aud": "gateway",
+    "Request.TokenExchange.scope": "use_gateway"
+  }
+}
+```
+
+The `token_type` parameters are always present (empty string when there is no actor token). The `token` parameters are present only for `access_token`-declared inputs: JWT inputs were already validated locally against their issuer's JWKS and are never sent to PingOne Authorize. The policy introspects declared access tokens at their issuer (RFC 7662) and makes the final trust/delegation decision.
+
+The P1AZ snapshot in [`p1az/TokenExchange.snapshot`](p1az/TokenExchange.snapshot) defines the corresponding `Request.TokenExchange` attributes (including `token_type` and `token`), the token-introspection services the policy calls for `access_token`-declared inputs, and policy checks for trusted issuers, requested audiences, and requested scopes. The snapshot is a policy reference only; the service sends the decision request at runtime and does not make those authorization decisions locally.
 
 ## Environment variables
 
@@ -82,12 +104,8 @@ The service is configured entirely through environment variables. Secrets should
 | `P1AZ_WORKER_CLIENT_SECRET` | Yes | PingOne Worker application secret. The Worker token request uses `client_credentials` with no scope. |
 | `P1AZ_TIMEOUT_SECONDS` | No | Timeout for Worker-token and decision calls. Default: `5`. |
 | `P1AZ_TOKEN_SAFETY_SECONDS` | No | Refresh margin before a cached Worker token expires. Default: `60`. |
-| `INTROSPECTION_ISSUER` | Required for `access_token` inputs | The single OIDC issuer whose RFC 7662 introspection endpoint validates declared access tokens. |
-| `INTROSPECTION_CLIENT_ID` | Required for `access_token` inputs | Confidential client ID used for RFC 7662 Basic authentication. |
-| `INTROSPECTION_CLIENT_SECRET` | Required for `access_token` inputs | Confidential client secret used for RFC 7662 Basic authentication. |
-| `INTROSPECTION_TIMEOUT_SECONDS` | No | Timeout for OIDC discovery and introspection calls. Default: `5`. |
 
-`P1AZ_WORKER_CLIENT_SECRET`, `INTROSPECTION_CLIENT_SECRET`, `TOKEN_CLIENT_SECRET`, and the signing key are sensitive. Never log, commit, or include them in image layers. `P1AZ_WORKER_CLIENT_ID` and `INTROSPECTION_CLIENT_ID` are also operational credentials and should be injected from deployment secrets where practical.
+`P1AZ_WORKER_CLIENT_SECRET`, `TOKEN_CLIENT_SECRET`, and the signing key are sensitive. Never log, commit, or include them in image layers. `P1AZ_WORKER_CLIENT_ID` is also an operational credential and should be injected from deployment secrets where practical.
 
 ## Run locally
 
@@ -98,7 +116,7 @@ cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-The service has no database or admin UI. Configure all credentials and policy through environment variables. JWT validation derives the issuer from each token and performs safe OIDC discovery/JWKS verification. Opaque access tokens use RFC 7662 through the single configured `INTROSPECTION_ISSUER` and its single configured introspection client; this service is intentionally scoped to one known access-token issuer, not a multi-issuer introspection broker. A second access-token issuer requires a separate deployment/configuration (or a future per-issuer credential design). PingOne Authorize makes the final trust/delegation decision. The development `.env.example` enables HTTP only for local test issuers. Production issuers must use HTTPS and resolve outside private/link-local networks.
+The service has no database or admin UI. Configure all credentials and policy through environment variables. JWT validation derives the issuer from each token and performs safe OIDC discovery/JWKS verification. Declared `access_token` inputs are opaque to this service: their raw values are sent to PingOne Authorize, which performs RFC 7662 introspection at the issuer and makes the trust decision. The development `.env.example` enables HTTP only for local test issuers. Production issuers must use HTTPS and resolve outside private/link-local networks.
 
 ## Token validation
 
@@ -107,9 +125,9 @@ The declared RFC 8693 token type selects the validation method:
 | Token type | Validation |
 |---|---|
 | `urn:ietf:params:oauth:token-type:jwt` | OIDC discovery, JWKS lookup, algorithm/key selection, signature verification, issuer, expiry, issued-at, and claim-shape checks |
-| `urn:ietf:params:oauth:token-type:access_token` | RFC 7662 introspection at the configured `INTROSPECTION_ISSUER`; requires an introspection response with `active: true` |
+| `urn:ietf:params:oauth:token-type:access_token` | Sent to PingOne Authorize as `Request.TokenExchange.<Subject/Actor>.token`; the policy validates it by introspecting it at the issuer (RFC 7662) and fails closed |
 
-An `access_token` is introspected even when it is JWT-shaped. The service does not use its JWKS path for that declared token type. The introspection client credentials are separate from the RFC 8693 client credentials and the PingOne Authorize Worker credentials.
+An `access_token` is never validated locally, even when it is JWT-shaped: the service does not use its JWKS path for that declared type. The policy is the sole validator for that token type.
 
 The service performs authentication and token-shape validation only. It does not locally authorize issuer trust, subject/Agent delegation, requested audience, or requested scope. Those decisions are sent to PingOne Authorize, and only `PERMIT` results in a minted token.
 

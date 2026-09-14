@@ -22,10 +22,6 @@ class Settings(BaseSettings):
     p1az_worker_client_secret: str = ''
     p1az_timeout_seconds: float = 5.0
     p1az_token_safety_seconds: int = 60
-    introspection_client_id: str = ''
-    introspection_client_secret: str = ''
-    introspection_timeout_seconds: float = 5.0
-    introspection_issuer: str = ''
 
 @lru_cache
 def get_settings() -> Settings:
